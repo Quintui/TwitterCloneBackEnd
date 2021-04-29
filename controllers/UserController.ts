@@ -1,8 +1,15 @@
 import express = require("express");
-import { UserModel, UserSchemaInterface } from "../models/UsersModel";
+import {
+  UserModel,
+  UserSchemaInterface,
+  UserSchemaModelType,
+} from "../models/UsersModel";
+import * as jwt from "jsonwebtoken";
 import { validationResult } from "express-validator";
 import { generateMD5 } from "../utils/generateHash";
 import { sendMail } from "../utils/sendMail";
+
+const isValidObjId = require("mongoose").Types.ObjectId.isValid;
 
 class UserController {
   async index(_, res: express.Response): Promise<void> {
@@ -12,6 +19,33 @@ class UserController {
       res.json({
         status: "success",
         data: users,
+      });
+    } catch (error) {
+      res.json({
+        status: "error",
+        errors: JSON.stringify(error),
+      });
+    }
+  }
+  async show(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      const userId = req.params.id;
+
+      if (!isValidObjId(userId)) {
+        res.status(400).send();
+        return;
+      }
+
+      const user = await UserModel.findById(userId).exec();
+
+      if (!user) {
+        res.status(404).send();
+        return;
+      }
+
+      res.json({
+        status: "success",
+        data: user,
       });
     } catch (error) {
       res.json({
@@ -31,15 +65,12 @@ class UserController {
         });
         return;
       }
-
       const data: UserSchemaInterface = {
         email: req.body.email,
         fullname: req.body.fullname,
         username: req.body.username,
-        password: req.body.password,
-        confirmHash: generateMD5(
-          process.env.SECRET_KEY || Math.random().toString()
-        ),
+        password: generateMD5(req.body.password + process.env.SECRET_KEY),
+        confirmHash: generateMD5(Math.random().toString()),
       };
 
       const user = await UserModel.create(data);
@@ -51,7 +82,7 @@ class UserController {
           subject: "Confirmation Mail",
           html: `For confirm email click to => <a href="http://localhost:${
             process.env.PORT || 9999
-          }/users/verify?hash=${data.confirmHash}"> ME;) </a>`,
+          }/auth/verify?hash=${data.confirmHash}"> ME;) </a>`,
         },
         (error: Error | null) => {
           if (error) {
@@ -104,6 +135,22 @@ class UserController {
         errors: JSON.stringify(error),
       });
     }
+  }
+
+  async afterLogin(req: express.Request, res: express.Response): Promise<void> {
+    const user = req.user
+      ? (req.user as UserSchemaModelType).toJSON()
+      : undefined;
+
+    res.json({
+      status: "success",
+      data: {
+        ...user,
+        token: jwt.sign(user, process.env.SECRET_KEY || "123", {
+          expiresIn: "30d",
+        }),
+      },
+    });
   }
 }
 
